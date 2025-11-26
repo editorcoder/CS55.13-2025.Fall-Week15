@@ -3,6 +3,8 @@ import { Camera, CameraResultType, CameraSource } from "@capacitor/camera";
 import type { Photo } from "@capacitor/camera";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { Preferences } from "@capacitor/preferences";
+import { isPlatform } from "@ionic/react";
+import { Capacitor } from "@capacitor/core";
 
 export function usePhotoGallery() {
   const [photos, setPhotos] = useState<UserPhoto[]>([]);
@@ -19,13 +21,16 @@ export function usePhotoGallery() {
         photoList ? JSON.parse(photoList) : []
       ) as UserPhoto[];
 
-      // CHANGE: Display the photo by reading into base64 format
-      for (const photo of photosInPreferences) {
-        const readFile = await Filesystem.readFile({
-          path: photo.filepath,
-          directory: Directory.Data,
-        });
-        photo.webviewPath = `data:image/jpeg;base64,${readFile.data}`;
+      // If running on the web...
+      if (!isPlatform("hybrid")) {
+        for (const photo of photosInPreferences) {
+          const readFile = await Filesystem.readFile({
+            path: photo.filepath,
+            directory: Directory.Data,
+          });
+          // Display the photo by reading into base64 format
+          photo.webviewPath = `data:image/jpeg;base64,${readFile.data}`;
+        }
       }
 
       setPhotos(photosInPreferences);
@@ -46,7 +51,6 @@ export function usePhotoGallery() {
     const fileName = Date.now() + ".jpeg";
     // Save the picture and add it to photo collection
     const savedImageFile = await savePicture(capturedPhoto, fileName);
-
     // Update state with new photo
     const newPhotos = [savedImageFile, ...photos];
     setPhotos(newPhotos);
@@ -60,9 +64,19 @@ export function usePhotoGallery() {
     fileName: string
   ): Promise<UserPhoto> => {
     // Fetch the photo, read as a blob, then convert to base64 format
-    const response = await fetch(photo.webPath!);
-    const blob = await response.blob();
-    const base64Data = (await convertBlobToBase64(blob)) as string;
+    let base64Data: string | Blob;
+    // "hybrid" will detect mobile - iOS or Android
+    if (isPlatform("hybrid")) {
+      const readFile = await Filesystem.readFile({
+        path: photo.path!,
+      });
+      base64Data = readFile.data;
+    } else {
+      // Fetch the photo, read as a blob, then convert to base64 format
+      const response = await fetch(photo.webPath!);
+      const blob = await response.blob();
+      base64Data = (await convertBlobToBase64(blob)) as string;
+    }
 
     const savedFile = await Filesystem.writeFile({
       path: fileName,
@@ -70,11 +84,20 @@ export function usePhotoGallery() {
       directory: Directory.Data,
     });
 
-    // Use webPath to display the new image instead of base64 since it's already loaded into memory
-    return {
-      filepath: fileName,
-      webviewPath: photo.webPath,
-    };
+    // Platform check
+    if (isPlatform("hybrid")) {
+      // Display the new image by rewriting the 'file://' path to HTTP
+      return {
+        filepath: savedFile.uri,
+        webviewPath: Capacitor.convertFileSrc(savedFile.uri),
+      };
+    } else {
+      // Use webPath to display the new image instead of base64 since it's already loaded into memory
+      return {
+        filepath: fileName,
+        webviewPath: photo.webPath,
+      };
+    }
   };
 
   const convertBlobToBase64 = (blob: Blob) => {
