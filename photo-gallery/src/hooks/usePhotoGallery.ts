@@ -1,11 +1,38 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Camera, CameraResultType, CameraSource } from "@capacitor/camera";
 import type { Photo } from "@capacitor/camera";
 import { Filesystem, Directory } from "@capacitor/filesystem";
+import { Preferences } from "@capacitor/preferences";
 
 export function usePhotoGallery() {
-    
   const [photos, setPhotos] = useState<UserPhoto[]>([]);
+
+  // Add a key for photo storage
+  const PHOTO_STORAGE = "photos";
+
+  useEffect(() => {
+    const loadSaved = async () => {
+      const { value: photoList } = await Preferences.get({
+        key: PHOTO_STORAGE,
+      });
+      const photosInPreferences = (
+        photoList ? JSON.parse(photoList) : []
+      ) as UserPhoto[];
+
+      // CHANGE: Display the photo by reading into base64 format
+      for (const photo of photosInPreferences) {
+        const readFile = await Filesystem.readFile({
+          path: photo.filepath,
+          directory: Directory.Data,
+        });
+        photo.webviewPath = `data:image/jpeg;base64,${readFile.data}`;
+      }
+
+      setPhotos(photosInPreferences);
+    };
+
+    loadSaved();
+  }, []);
 
   const addNewToGallery = async () => {
     // Take a photo
@@ -23,6 +50,9 @@ export function usePhotoGallery() {
     // Update state with new photo
     const newPhotos = [savedImageFile, ...photos];
     setPhotos(newPhotos);
+
+    // Add method to cache all photo data for future retrieval
+    Preferences.set({ key: PHOTO_STORAGE, value: JSON.stringify(newPhotos) });
   };
 
   const savePicture = async (
